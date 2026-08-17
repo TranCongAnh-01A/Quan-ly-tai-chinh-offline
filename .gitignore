@@ -1,0 +1,42 @@
+# === Flutter / Dart ===
+*.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# === Dependencies ===
+.dart_tool/
+.pub-cache/
+.pub/
+
+# === Isar Database (local data) ===
+*.isar
+*.isar.lock
+default.isar
+
+# === IDE ===
+.vscode/
+.idea/
+*.iml
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Generated files ===
+*.g.dart
+*.freezed.dart
+
+# === Android ===
+mone_jour/android/.gradle/
+mone_jour/android/local.properties
+mone_jour/android/key.properties
+*.jks
+*.keystore
+
+# === iOS ===
+mone_jour/ios/Pods/
+mone_jour/ios/.symlinks/
+mone_jour/ios/Flutter/Flutter.framework
+mone_jour/ios/Flutter/Flutter.podspec

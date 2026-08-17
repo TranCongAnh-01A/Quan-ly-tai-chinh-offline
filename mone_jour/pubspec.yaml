@@ -1,0 +1,64 @@
+name: mone_jour
+description: "MoneJour — Quản lý chi tiêu cá nhân + Nhật ký cảm xúc (Offline 100%)"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # ── Local Database (Offline-first) ──
+  isar: ^3.1.0+1
+  isar_flutter_libs: ^3.1.0+1
+
+  # ── State Management ──
+  flutter_bloc: ^9.0.0
+  equatable: ^2.0.7
+
+  # ── UI & Charts ──
+  cupertino_icons: ^1.0.8
+  fl_chart: ^0.69.0
+  intl: ^0.20.2
+
+  # ── Utilities ──
+  path_provider: ^2.1.6
+  shared_preferences: ^2.5.5
+  share_plus: ^10.0.0
+  archive: ^4.0.9
+  file_picker: ^8.1.4
+  local_auth: ^3.0.1
+  google_sign_in: ^6.2.2
+  googleapis: ^16.0.0
+  googleapis_auth: ^2.3.1
+  http: ^1.6.0
+  lottie: ^3.3.3
+  crypto: ^3.0.7
+  csv: ^6.0.0
+  flutter_secure_storage: ^10.3.1
+  google_fonts: ^8.2.0
+  phosphor_flutter: ^2.1.0
+  image_picker: ^1.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+  # ── Isar Code Generation ──
+  isar_generator: ^3.1.0+1
+  build_runner: ^2.4.13
+  flutter_launcher_icons: ^0.14.4
+  mocktail: ^1.0.5
+
+flutter:
+  uses-material-design: true
+
+  # ── Assets ──
+  assets:
+    - assets/animations/
