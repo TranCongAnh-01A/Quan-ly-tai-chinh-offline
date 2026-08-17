@@ -23,19 +23,26 @@
 
 1. Đảm bảo bạn đã cài đặt Flutter SDK (v3.19.0 trở lên) và Dart (v3.3.0 trở lên).
 2. Clone repository này về máy:
+
    ```bash
    git clone <đường_dẫn_repo_của_bạn>
    cd <tên_thư_mục>/mone_jour
    ```
+
 3. Cài đặt các gói phụ thuộc (dependencies):
+
    ```bash
    flutter pub get
    ```
+
 4. Chạy trình tạo mã tự động (bắt buộc để tạo model cho Isar Database):
+
    ```bash
    dart run build_runner build --delete-conflicting-outputs
    ```
+
 5. Khởi chạy ứng dụng (trên máy ảo hoặc thiết bị thật):
+
    ```bash
    flutter run
    ```
@@ -44,11 +51,11 @@
 
 Để tìm hiểu sâu hơn về kiến trúc dự án, cách thiết lập cấu hình nâng cao, hoặc cách đóng góp mã nguồn, vui lòng xem trong thư mục `docs/`:
 
-- [Bản đồ Tài liệu (INDEX)](../docs/INDEX.md)
-- [Hướng dẫn thiết lập chi tiết](../docs/mone_jour_setup.md)
-- [Hướng dẫn cấu hình Google Drive API (để bật tính năng Cloud Sync)](../docs/google_drive_api_setup.md)
-- [Cẩm nang cho người mới & Hướng dẫn đóng góp (ONBOARDING)](../docs/ONBOARDING.md)
+- [Bản đồ Tài liệu (INDEX)](docs/INDEX.md)
+- [Hướng dẫn thiết lập chi tiết](docs/mone_jour_setup.md)
+- [Hướng dẫn cấu hình Google Drive API (để bật tính năng Cloud Sync)](docs/google_drive_api_setup.md)
+- [Cẩm nang cho người mới & Hướng dẫn đóng góp (ONBOARDING)](docs/ONBOARDING.md)
 
 ## 🤝 Đóng góp (Contributing)
 
-Dự án này là mã nguồn mở. Mọi đóng góp dưới hình thức báo lỗi (issues), đóng góp ý tưởng, hoặc mã nguồn (pull requests) đều được hoan nghênh nồng nhiệt! Xin vui lòng đọc file [ONBOARDING](../docs/ONBOARDING.md) trước khi bắt đầu.
+Dự án này là mã nguồn mở. Mọi đóng góp dưới hình thức báo lỗi (issues), đóng góp ý tưởng, hoặc mã nguồn (pull requests) đều được hoan nghênh nồng nhiệt! Xin vui lòng đọc file [ONBOARDING](docs/ONBOARDING.md) trước khi bắt đầu.
