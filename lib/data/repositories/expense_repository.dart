@@ -27,6 +27,11 @@ class ExpenseRepository {
     await _db.writeTxn(() => _db.expenses.delete(id));
   }
 
+  /// Lấy 1 giao dịch theo ID (null nếu không tồn tại).
+  Future<Expense?> getById(int id) async {
+    return _db.expenses.get(id);
+  }
+
   /// Lấy tất cả chi tiêu trong khoảng thời gian, sắp xếp mới nhất trước.
   Future<List<Expense>> getByDateRange(DateTime start, DateTime end) async {
     return _db.expenses
@@ -53,7 +58,12 @@ class ExpenseRepository {
   }) async {
     return _db.expenses
         .filter()
-        .optional(startDate != null && endDate != null, (q) => q.dateBetween(startDate!, endDate!))
+        // Lọc 2 mốc độc lập nhau — trước đây dùng dateBetween nên chỉ truyền
+        // 1 trong 2 mốc thì điều kiện ngày bị bỏ qua hoàn toàn.
+        .optional(startDate != null,
+            (q) => q.dateGreaterThan(startDate!, include: true))
+        .optional(
+            endDate != null, (q) => q.dateLessThan(endDate!, include: true))
         .optional(note != null && note.isNotEmpty, (q) => q.noteContains(note!, caseSensitive: false))
         .optional(minAmount != null, (q) => q.amountGreaterThan(minAmount! - 0.01))
         .optional(maxAmount != null, (q) => q.amountLessThan(maxAmount! + 0.01))

@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../../core/constants/categories.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_input_formatter.dart';
 import '../../../core/utils/date_formatter.dart';
+import '../../../core/utils/receipt_storage.dart';
 import '../../../data/models/expense.dart';
 import '../../../logic/budget/budget_cubit.dart';
 import '../../../logic/budget/budget_state.dart';
@@ -39,7 +39,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   bool _amountError = false;
 
   FundingSource _selectedSource = FundingSource.cash;
+
+  /// Tên file ảnh hóa đơn (xem ReceiptStorage — KHÔNG lưu đường dẫn tuyệt đối)
   String? _receiptImagePath;
+
+  /// Ảnh được chụp/chọn trong phiên làm việc này. Nếu người dùng thoát mà
+  /// không lưu, hoặc thay bằng ảnh khác, các file này phải được xóa để không
+  /// tích tụ ảnh mồ côi trong thư mục documents.
+  final List<String> _sessionFiles = [];
+  bool _savedSuccessfully = false;
 
   bool get _isEditMode => widget.editExpense != null;
 
@@ -79,6 +87,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
 
   @override
   void dispose() {
+    // Dọn ảnh đã chụp trong phiên này nhưng cuối cùng không được lưu
+    for (final fileName in _sessionFiles) {
+      if (_savedSuccessfully && fileName == _receiptImagePath) continue;
+      ReceiptStorage.delete(fileName);
+    }
+
     _amountController.dispose();
     _noteController.dispose();
     super.dispose();
@@ -95,17 +109,36 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       );
 
       if (pickedFile != null) {
-        final directory = await getApplicationDocumentsDirectory();
-        final path = directory.path;
-        final fileName = 'receipt_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final localImage = await File(pickedFile.path).copy('$path/$fileName');
+        final fileName = await ReceiptStorage.save(pickedFile.path);
+        final replaced = _receiptImagePath;
 
-        setState(() {
-          _receiptImagePath = localImage.path;
-        });
+        _sessionFiles.add(fileName);
+        if (mounted) {
+          setState(() => _receiptImagePath = fileName);
+        }
+
+        // Ảnh vừa chụp ở phiên này mà đã bị thay thế → xóa ngay, nó chưa
+        // từng được giao dịch nào tham chiếu.
+        if (replaced != null && _sessionFiles.remove(replaced)) {
+          await ReceiptStorage.delete(replaced);
+        }
       }
     } finally {
       AuthWrapper.pauseLock = false;
+    }
+  }
+
+  /// Bỏ ảnh khỏi giao dịch.
+  ///
+  /// Chỉ xóa file ngay nếu đó là ảnh vừa chụp ở phiên này. Ảnh của giao dịch
+  /// đã lưu chỉ được xóa sau khi lưu thành công — tránh mất ảnh nếu người
+  /// dùng đổi ý và thoát màn hình.
+  void _removeReceipt() {
+    final removed = _receiptImagePath;
+    setState(() => _receiptImagePath = null);
+
+    if (removed != null && _sessionFiles.remove(removed)) {
+      ReceiptStorage.delete(removed);
     }
   }
 
@@ -368,17 +401,27 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.file(
-                      File(_receiptImagePath!),
+                      File(ReceiptStorage.resolve(_receiptImagePath)!),
                       height: 120,
                       width: double.infinity,
                       fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        height: 120,
+                        width: double.infinity,
+                        alignment: Alignment.center,
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        child: Text(
+                          'Không đọc được ảnh hóa đơn',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
                     ),
                   ),
                   Positioned(
                     top: 8,
                     right: 8,
                     child: IconButton.filled(
-                      onPressed: () => setState(() => _receiptImagePath = null),
+                      onPressed: _removeReceipt,
                       icon: Icon(PhosphorIcons.x()),
                       style: IconButton.styleFrom(backgroundColor: Colors.black54),
                     ),
@@ -466,11 +509,19 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     // ── Kiểm tra cảnh báo hạn mức (chỉ áp dụng cho chi tiêu, không phải thu nhập/chuyển tiền) ──
     if (!isIncome && !isTransfer) {
       final budgetCubit = context.read<BudgetCubit>();
-      final oldAmount = _isEditMode ? widget.editExpense!.amount : 0.0;
+      final oldExpense = _isEditMode ? widget.editExpense! : null;
+      // Chỉ khoản CHI (không phải thu nhập/chuyển tiền) mới nằm trong spending,
+      // nên chỉ khoản chi cũ mới được trừ ra khi tính lại cảnh báo.
+      final oldCounted =
+          oldExpense != null && !oldExpense.isIncome && !oldExpense.isTransfer;
       final warning = await budgetCubit.checkBudgetWarning(
         finalCategory,
         amount,
-        oldAmount: oldAmount,
+        // Tra hạn mức theo tháng của giao dịch, không phải tháng đang xem
+        date: _selectedDate,
+        oldAmount: oldCounted ? oldExpense.amount : 0.0,
+        oldCategoryId: oldCounted ? oldExpense.category : null,
+        oldDate: oldCounted ? oldExpense.date : null,
       );
 
       if (warning != null && mounted) {
@@ -493,7 +544,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                   : 'Sắp vượt hạn mức',
             ),
             content: Text(
-              'Danh mục "$categoryName" sẽ đạt ${warning.percentage}% hạn mức tháng này.\n'
+              'Danh mục "$categoryName" sẽ đạt ${warning.percentage}% hạn mức '
+              'tháng ${_selectedDate.month}/${_selectedDate.year}.\n'
               'Bạn có chắc chắn muốn lưu giao dịch này?',
             ),
             actions: [
@@ -546,6 +598,18 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
           date: _selectedDate,
           note: _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
         );
+      }
+
+      _savedSuccessfully = true;
+
+      // Ảnh cũ không còn giao dịch nào trỏ tới → xóa để không tích tụ file rác
+      final oldReceipt = widget.editExpense?.receiptImagePath;
+      if (oldReceipt != null &&
+          ReceiptStorage.fileNameOf(oldReceipt) !=
+              (_receiptImagePath == null
+                  ? null
+                  : ReceiptStorage.fileNameOf(_receiptImagePath!))) {
+        await ReceiptStorage.delete(oldReceipt);
       }
 
       if (mounted) Navigator.pop(context);

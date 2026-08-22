@@ -7,6 +7,7 @@ import '../../core/constants/categories.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
+import '../../core/utils/receipt_storage.dart';
 import '../../data/models/expense.dart';
 import '../../logic/expense/expense_cubit.dart';
 import '../screens/expense/add_expense_screen.dart';
@@ -278,7 +279,11 @@ void _showDeleteConfirmation(BuildContext context, Expense expense) {
   );
 }
 
-void _showReceiptImage(BuildContext context, String imagePath) {
+void _showReceiptImage(BuildContext context, String storedPath) {
+  // DB chỉ lưu tên file — ghép với thư mục documents hiện tại lúc đọc
+  final imagePath = ReceiptStorage.resolve(storedPath);
+  if (imagePath == null) return;
+
   showDialog(
     context: context,
     builder: (context) => Dialog(
@@ -293,6 +298,15 @@ void _showReceiptImage(BuildContext context, String imagePath) {
               child: Image.file(
                 File(imagePath),
                 fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  padding: const EdgeInsets.all(24),
+                  color: Colors.black87,
+                  child: const Text(
+                    'Không tìm thấy ảnh hóa đơn.',
+                    style: TextStyle(color: Colors.white),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ),
             ),
           ),
