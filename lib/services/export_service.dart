@@ -11,10 +11,26 @@ import '../data/models/budget.dart';
 import '../data/models/fixed_expense.dart';
 import '../data/models/journal.dart';
 
+import '../core/utils/receipt_storage.dart';
 import '../ui/screens/auth/auth_wrapper.dart';
 
 class ExportService {
   Isar get _db => DatabaseService.instance;
+
+  /// Phiên bản định dạng backup. Tăng lên khi cấu trúc thay đổi.
+  static const int backupFormatVersion = 1;
+
+  /// Dấu nhận dạng file backup của app.
+  ///
+  /// Không có nó thì lúc khôi phục không tài nào phân biệt được backup thật
+  /// với một file JSON bất kỳ — mà khôi phục thì XÓA SẠCH dữ liệu hiện có.
+  static const String backupAppId = 'mone_jour';
+
+  /// Tên file dữ liệu bên trong gói backup .zip
+  static const String archiveDataEntry = 'data.json';
+
+  /// Thư mục chứa ảnh hóa đơn bên trong gói backup .zip
+  static const String archiveReceiptDir = 'receipts';
 
   /// Lấy toàn bộ dữ liệu dưới dạng chuỗi JSON (Dùng cho Cloud Sync)
   Future<String> getAllDataAsJsonString() async {
@@ -24,6 +40,10 @@ class ExportService {
     final journals = await _db.journals.where().findAll();
 
     final data = {
+      // Metadata để phía import nhận diện và kiểm tra tính hợp lệ
+      'appId': backupAppId,
+      'version': backupFormatVersion,
+      'exportedAt': DateTime.now().toIso8601String(),
       'expenses': expenses.map((e) => {
             'id': e.id,
             'amount': e.amount,
@@ -50,6 +70,9 @@ class ExportService {
             'amount': f.amount,
             'categoryId': f.categoryId,
             'note': f.note,
+            // Thiếu trường này thì sau khi khôi phục thứ tự template bị đảo,
+            // vì FixedExpenseRepository.getAll() sắp xếp theo createdAt
+            'createdAt': f.createdAt.toIso8601String(),
           }).toList(),
       'journals': journals.map((j) => {
             'id': j.id,
@@ -62,11 +85,57 @@ class ExportService {
     return jsonEncode(data);
   }
 
+  /// Đóng gói toàn bộ dữ liệu + ảnh hóa đơn thành 1 file ZIP.
+  ///
+  /// Vì sao không dùng JSON thuần như trước: JSON chỉ lưu ĐƯỜNG DẪN ảnh, không
+  /// lưu ảnh. Khôi phục sang máy khác thì mọi ảnh hóa đơn đều mất — mà đổi máy
+  /// lại đúng là lúc người ta cần backup nhất.
+  ///
+  /// Cấu trúc gói:
+  ///   data.json            — toàn bộ dữ liệu (giống getAllDataAsJsonString)
+  ///   receipts/[tên file]  — ảnh hóa đơn
+  Future<List<int>> buildBackupArchive() async {
+    final archive = Archive();
+
+    final jsonBytes = utf8.encode(await getAllDataAsJsonString());
+    archive.addFile(
+      ArchiveFile(archiveDataEntry, jsonBytes.length, jsonBytes),
+    );
+
+    final expenses = await _db.expenses.where().findAll();
+    final receiptNames = expenses
+        .map((e) => e.receiptImagePath)
+        .whereType<String>()
+        .where((path) => path.isNotEmpty)
+        .map(ReceiptStorage.fileNameOf)
+        .toSet();
+
+    for (final name in receiptNames) {
+      final path = ReceiptStorage.resolve(name);
+      if (path == null) continue;
+
+      final file = File(path);
+      // Ảnh có thể đã bị xóa ngoài app — bỏ qua, không làm hỏng cả gói backup
+      if (!await file.exists()) continue;
+
+      final bytes = await file.readAsBytes();
+      archive.addFile(
+        ArchiveFile('$archiveReceiptDir/$name', bytes.length, bytes),
+      );
+    }
+
+    return ZipEncoder().encode(archive);
+  }
+
   /// Xuất toàn bộ dữ liệu ra file JSON duy nhất và share
+  ///
+  /// Ghi vào thư mục tạm chứ không phải documents: đây là file trung gian để
+  /// đưa cho Share sheet, giữ lại trong documents chỉ làm phình dung lượng app
+  /// sau mỗi lần xuất (tên file có timestamp nên không bao giờ ghi đè).
   Future<void> exportToJson() async {
     final jsonString = await getAllDataAsJsonString();
-    final directory = await getApplicationDocumentsDirectory();
-    final file = File('${directory.path}/monejour_backup_${DateTime.now().millisecondsSinceEpoch}.json');
+    final directory = await getTemporaryDirectory();
+    final file = File('${directory.path}/monejour_backup.json');
     await file.writeAsString(jsonString);
 
     AuthWrapper.pauseLock = true;

@@ -3,7 +3,7 @@
 > ⚠️ Tài liệu này hướng dẫn cách cấu hình Google Cloud Console và Firebase để kích hoạt tính năng Đồng bộ Đám mây (Cloud Sync) cho ứng dụng Giản Ký.
 > Nếu bạn chỉ muốn chạy ứng dụng cục bộ (Offline), bạn có thể **bỏ qua** tài liệu này.
 
-**Cập nhật lần cuối:** 2026-08-17
+**Cập nhật lần cuối:** 2026-08-22
 
 ---
 
@@ -22,7 +22,9 @@ Quy trình thiết lập bao gồm 4 bước chính:
 ## Bước 1: Tạo dự án trên Firebase Console
 
 > 💡 **Tại sao lại dùng Firebase cho ứng dụng Offline?**
-> Giản Ký hoàn toàn không sử dụng database hay dịch vụ theo dõi nào của Firebase (bạn có thể kiểm chứng trong `pubspec.yaml`). Chúng ta chỉ "mượn" giao diện Firebase Console như một công cụ tiện ích để tự động sinh ra các file cấu hình `google-services.json` và `GoogleService-Info.plist`. Đây là cách chuẩn, nhanh và ít lỗi nhất để thiết lập Google Sign-In trong Flutter. Sau khi lấy được file cấu hình, ứng dụng sẽ giao tiếp trực tiếp với Google Drive API.
+> Giản Ký hoàn toàn không sử dụng database hay dịch vụ theo dõi nào của Firebase (bạn có thể kiểm chứng trong `pubspec.yaml`). Chúng ta chỉ "mượn" giao diện Firebase Console để đăng ký ứng dụng và tạo sẵn OAuth 2.0 Client ID bên phía Google Cloud. Sau đó ứng dụng giao tiếp trực tiếp với Google Drive API.
+>
+> 📌 **Thứ thực sự làm cho đăng nhập chạy được** là cặp **tên gói + SHA-1** đã đăng ký trên Google Cloud, chứ không phải file `google-services.json`. Dự án này **không** áp dụng plugin `com.google.gms.google-services`, nên kể cả bạn có đặt file JSON vào `android/app/` thì nó cũng không được đọc. Bước tải file về ở dưới chỉ để đối chiếu thông tin cấu hình.
 
 Firebase sẽ giúp tự động hóa quá trình tạo OAuth 2.0 Client ID bên phía Google Cloud.
 
@@ -36,16 +38,18 @@ Firebase sẽ giúp tự động hóa quá trình tạo OAuth 2.0 Client ID bên
 
 ### Dành cho Android
 1. Từ trang tổng quan (Dashboard) của Firebase, chọn biểu tượng **Android**.
-2. Nhập **Android package name** (Tên gói). Mặc định của Giản Ký thường là `com.example.mone_jour` (hãy kiểm tra biến `applicationId` trong file `mone_jour/android/app/build.gradle`).
+2. Nhập **Android package name** (Tên gói): `com.monejour.mone_jour` (giá trị `applicationId` trong `android/app/build.gradle.kts`).
+
+   > ⚠️ Nhập sai tên gói là nguyên nhân phổ biến nhất khiến đăng nhập Google thất bại với `ApiException: 10` (DEVELOPER_ERROR). Tên gói và SHA-1 phải khớp chính xác.
 3. Nhập **App nickname** (Biệt danh ứng dụng) (VD: `Giản Ký Android`).
 4. Bỏ trống mã SHA-1 lúc này (chúng ta sẽ thêm ở Bước 3), nhấn **Register app**.
-5. Tải xuống file `google-services.json`.
+5. Tải xuống file `google-services.json` (tùy chọn — xem ghi chú ở mục 1, dự án không đọc file này).
 6. Đặt file này vào thư mục `mone_jour/android/app/` trong mã nguồn.
 
 ### Dành cho iOS (Nếu bạn dùng máy Mac)
 1. Chọn biểu tượng **iOS**.
 2. Nhập **Apple bundle ID** (giống với package name của Android).
-3. Tải xuống file `GoogleService-Info.plist`.
+3. Tải xuống file `GoogleService-Info.plist` (iOS cần file này để lấy `REVERSED_CLIENT_ID` cấu hình URL scheme).
 4. Đặt file này vào thư mục `mone_jour/ios/Runner/` (tốt nhất là bạn kéo thả file này vào thư mục Runner thông qua XCode để XCode tự liên kết file).
 
 > ⚠️ **Bảo mật:** Đảm bảo rằng file `google-services.json` và `GoogleService-Info.plist` đã được thêm vào file `.gitignore` để không bị đẩy lên GitHub.

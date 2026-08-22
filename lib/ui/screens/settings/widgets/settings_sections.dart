@@ -46,13 +46,20 @@ class CloudSyncCard extends StatelessWidget {
     }
   }
 
-  void _showRestoreConfirmDialog(BuildContext context) {
+  void _showRestoreConfirmDialog(BuildContext context, String? backupTime) {
+    // Nói rõ bản sao lưu từ bao giờ: khôi phục là thao tác đè, người dùng cần
+    // biết mình sắp thay dữ liệu hiện tại bằng bản của ngày nào.
+    final when = backupTime != null
+        ? 'Bản sao lưu trên Drive: ${_formatTime(backupTime)}.\n\n'
+        : '';
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Xác nhận khôi phục'),
-        content: const Text(
-          'Hành động này sẽ XÓA TOÀN BỘ dữ liệu hiện tại trong máy và tải dữ liệu từ Google Drive về đè lên. Bạn có chắc chắn không?',
+        content: Text(
+          '${when}Hành động này sẽ XÓA TOÀN BỘ dữ liệu hiện tại trong máy '
+          'và tải dữ liệu từ Google Drive về đè lên. Bạn có chắc chắn không?',
         ),
         actions: [
           TextButton(
@@ -91,6 +98,9 @@ class CloudSyncCard extends StatelessWidget {
             ? state.lastSyncTime
             : (state is CloudSyncSuccess ? state.lastSyncTime : null);
         final isLoading = state is CloudSyncLoading;
+        final hasRemoteBackup = state is CloudSyncConnected
+            ? state.hasRemoteBackup
+            : (state is CloudSyncSuccess ? state.hasRemoteBackup : false);
 
         return Card(
           elevation: 0,
@@ -124,7 +134,7 @@ class CloudSyncCard extends StatelessWidget {
                             ),
                           if (lastSyncTime != null)
                             Text(
-                              'Lần cuối: ${_formatTime(lastSyncTime)}',
+                              'Sao lưu lần cuối: ${_formatTime(lastSyncTime)}',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                               ),
@@ -172,7 +182,12 @@ class CloudSyncCard extends StatelessWidget {
                       const SizedBox(width: 16),
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: isLoading ? null : () => _showRestoreConfirmDialog(context),
+                          onPressed: isLoading || !hasRemoteBackup
+                              ? null
+                              : () => _showRestoreConfirmDialog(
+                                    context,
+                                    lastSyncTime,
+                                  ),
                           icon: const Icon(Icons.download),
                           label: const Text('Khôi phục'),
                         ),

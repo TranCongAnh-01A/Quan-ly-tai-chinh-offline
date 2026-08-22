@@ -13,11 +13,17 @@ import '../data/models/expense.dart';
 import '../data/models/budget.dart';
 import '../data/models/fixed_expense.dart';
 import '../data/models/journal.dart';
+import '../core/utils/receipt_storage.dart';
 import '../ui/screens/auth/auth_wrapper.dart';
 import 'export_service.dart';
 
 class ImportService {
   Isar get _db => DatabaseService.instance;
+
+  /// Số bản auto-backup được giữ lại. Cũ hơn thì xóa.
+  static const int maxAutoBackups = 3;
+
+  static const String _autoBackupPrefix = 'monejour_auto_backup_';
 
   Future<bool> hasAnyData() async {
     final eCount = await _db.expenses.count();
@@ -47,6 +53,16 @@ class ImportService {
     return str == 'true' || str == '1';
   }
 
+  /// Đưa giá trị ảnh hóa đơn về dạng TÊN FILE.
+  ///
+  /// Backup đời cũ lưu đường dẫn tuyệt đối của máy cũ — giữ nguyên thì dữ liệu
+  /// mang theo rác của thiết bị khác (xem ReceiptStorage).
+  String? _normalizeReceiptPath(dynamic value) {
+    final raw = _parseNullableString(value);
+    if (raw == null) return null;
+    return ReceiptStorage.fileNameOf(raw);
+  }
+
   String? _parseNullableString(dynamic value) {
     if (value == null) return null;
     final str = value.toString();
@@ -54,18 +70,199 @@ class ImportService {
     return str;
   }
 
+  /// Ghi 1 bản backup trước khi import đè dữ liệu, đồng thời dọn bản cũ.
+  ///
+  /// Không dọn thì mỗi lần import lại sinh thêm 1 file JSON nằm vĩnh viễn
+  /// trong thư mục documents — dữ liệu càng nhiều thì file càng to.
+  Future<void> _writeAutoBackup() async {
+    if (!await hasAnyData()) return;
+
+    final dir = await getApplicationDocumentsDirectory();
+    final backupJson = await ExportService().getAllDataAsJsonString();
+    final backupFile = File(
+      '${dir.path}/$_autoBackupPrefix${DateTime.now().millisecondsSinceEpoch}.json',
+    );
+    await backupFile.writeAsString(backupJson);
+
+    await pruneAutoBackups(dir);
+  }
+
+  /// Chỉ giữ lại [maxAutoBackups] bản mới nhất.
+  @visibleForTesting
+  Future<void> pruneAutoBackups(Directory dir) async {
+    try {
+      final backups = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) =>
+              f.uri.pathSegments.last.startsWith(_autoBackupPrefix))
+          .toList();
+
+      if (backups.length <= maxAutoBackups) return;
+
+      // Tên file chứa timestamp nên sắp theo tên là sắp theo thời gian
+      backups.sort((a, b) => b.path.compareTo(a.path));
+
+      for (final old in backups.skip(maxAutoBackups)) {
+        await old.delete();
+      }
+    } catch (e) {
+      // Dọn dẹp thất bại không được làm hỏng thao tác import
+      debugPrint('Prune auto backup ERROR: $e');
+    }
+  }
+
+  /// Tên các file CSV mà app hiểu được khi nhập từ ZIP.
+  static const Set<String> _knownCsvNames = {
+    'expenses.csv',
+    'budgets.csv',
+    'fixed_expenses.csv',
+    'journals.csv',
+  };
+
+  /// Zip này là gói backup (có data.json) hay là bộ CSV?
+  bool _isBackupArchive(List<int> bytes) {
+    try {
+      return ZipDecoder().decodeBytes(bytes).files.any((f) =>
+          f.isFile &&
+          f.name.split('/').last == ExportService.archiveDataEntry);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Các bảng dữ liệu mà 1 file backup hợp lệ phải có ít nhất một.
+  static const List<String> _backupCollectionKeys = [
+    'expenses',
+    'budgets',
+    'fixedExpenses',
+    'journals',
+  ];
+
+  /// Kiểm tra nội dung có thực sự là backup của app hay không.
+  ///
+  /// Khôi phục là thao tác XÓA SẠCH dữ liệu hiện có rồi ghi đè. Trước đây
+  /// không kiểm tra gì: chọn nhầm một file JSON bất kỳ là mất trắng dữ liệu,
+  /// mà app vẫn báo "Khôi phục thành công".
+  ///
+  /// Backup đời cũ chưa có `appId` nên vẫn chấp nhận nếu có ít nhất 1 bảng
+  /// dữ liệu đúng dạng danh sách.
+  @visibleForTesting
+  static bool isValidBackup(dynamic decoded) {
+    if (decoded is! Map<String, dynamic>) return false;
+
+    if (decoded['appId'] == ExportService.backupAppId) return true;
+
+    return _backupCollectionKeys.any((key) => decoded[key] is List);
+  }
+
+  /// Thời điểm tạo backup, null nếu là file đời cũ chưa có metadata.
+  static DateTime? backupCreatedAt(Map<String, dynamic> data) =>
+      DateTime.tryParse(data['exportedAt']?.toString() ?? '');
+
+  /// Map 1 dòng CSV (file expenses.csv) thành Expense.
+  ///
+  /// Trả về null nếu dòng không đủ các cột bắt buộc (id..isIncome).
+  /// Các cột phía sau là tùy chọn: bản export cũ có ít cột hơn bản hiện tại,
+  /// nên mọi truy cập index > 5 đều phải kiểm tra độ dài trước.
+  @visibleForTesting
+  Expense? expenseFromCsvRow(List<dynamic> row) {
+    if (row.length < 6) return null;
+
+    final sourceIndex = row.length > 9 ? _parseInt(row[9], 0) : 0;
+
+    return Expense()
+      ..id = _parseInt(row[0], Isar.autoIncrement)
+      ..amount = _parseDouble(row[1])
+      ..category = row[2].toString().isEmpty ? 'other' : row[2].toString()
+      ..note = _parseNullableString(row[3])
+      ..date = DateTime.tryParse(row[4].toString()) ?? DateTime.now()
+      ..isIncome = _parseBool(row[5])
+      ..createdAt = row.length > 6
+          ? (DateTime.tryParse(row[6].toString()) ?? DateTime.now())
+          : DateTime.now()
+      ..isFixed = row.length > 7 ? _parseBool(row[7]) : false
+      ..isTransfer = row.length > 8 ? _parseBool(row[8]) : false
+      ..source = (sourceIndex >= 0 && sourceIndex < FundingSource.values.length)
+          ? FundingSource.values[sourceIndex]
+          : FundingSource.cash
+      ..receiptImagePath =
+          row.length > 10 ? _normalizeReceiptPath(row[10]) : null;
+  }
+
+  /// Khôi phục từ gói backup .zip (dữ liệu + ảnh hóa đơn).
+  ///
+  /// Ảnh được giải nén vào thư mục documents TRƯỚC khi ghi dữ liệu: nếu ghi
+  /// dữ liệu hỏng thì cùng lắm thừa vài file ảnh, còn nếu làm ngược lại thì
+  /// giao dịch trỏ tới ảnh chưa tồn tại.
+  Future<bool> importFromArchiveBytes(List<int> bytes) async {
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      final dataEntries = archive.files.where((f) {
+        return f.isFile &&
+            f.name.split('/').last == ExportService.archiveDataEntry;
+      });
+
+      if (dataEntries.isEmpty) {
+        debugPrint('Gói backup không có ${ExportService.archiveDataEntry}');
+        return false;
+      }
+
+      final content = utf8.decode(dataEntries.first.content as List<int>);
+
+      // Kiểm tra nội dung trước khi giải nén ảnh hay động vào database
+      if (!isValidBackup(jsonDecode(content))) {
+        debugPrint('Gói backup không hợp lệ');
+        return false;
+      }
+
+      await _restoreReceiptImages(archive);
+
+      return await importFromJsonString(content);
+    } catch (e) {
+      debugPrint('Import archive ERROR: $e');
+      return false;
+    }
+  }
+
+  /// Giải nén ảnh hóa đơn trong gói backup vào thư mục documents.
+  Future<void> _restoreReceiptImages(Archive archive) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final prefix = '${ExportService.archiveReceiptDir}/';
+
+    for (final entry in archive.files) {
+      if (!entry.isFile || !entry.name.startsWith(prefix)) continue;
+
+      // Chỉ lấy tên file, chặn đường dẫn kiểu `../..` trong zip
+      final fileName = entry.name.split('/').last;
+      if (fileName.isEmpty) continue;
+
+      try {
+        await File('${dir.path}/$fileName')
+            .writeAsBytes(entry.content as List<int>);
+      } catch (e) {
+        // Thiếu 1 ảnh không đáng để hỏng cả lần khôi phục
+        debugPrint('Restore receipt "$fileName" ERROR: $e');
+      }
+    }
+  }
+
   /// Import từ chuỗi JSON (Dùng cho Cloud Sync)
   Future<bool> importFromJsonString(String content) async {
     try {
       // Auto Backup trước khi xử lý
-      if (await hasAnyData()) {
-        final backupJson = await ExportService().getAllDataAsJsonString();
-        final tempDir = await getApplicationDocumentsDirectory();
-        final backupFile = File('${tempDir.path}/monejour_auto_backup_${DateTime.now().millisecondsSinceEpoch}.json');
-        await backupFile.writeAsString(backupJson);
+      await _writeAutoBackup();
+
+      final decoded = jsonDecode(content);
+
+      // Kiểm tra TRƯỚC khi động vào database — clear() là không thể hoàn tác
+      if (!isValidBackup(decoded)) {
+        debugPrint('Import bị từ chối: nội dung không phải backup của app');
+        return false;
       }
 
-      final data = jsonDecode(content) as Map<String, dynamic>;
+      final data = decoded as Map<String, dynamic>;
 
       await _db.writeTxn(() async {
         await _db.clear();
@@ -89,7 +286,8 @@ class ImportService {
                     ? FundingSource.values[idx]
                     : FundingSource.cash;
               })()
-              ..receiptImagePath = item['receiptImagePath']?.toString();
+              ..receiptImagePath =
+                  _normalizeReceiptPath(item['receiptImagePath']);
             await _db.expenses.put(e);
           }
         }
@@ -116,7 +314,9 @@ class ImportService {
               ..amount = _parseDouble(item['amount'])
               ..categoryId = item['categoryId']?.toString() ?? 'bills'
               ..note = item['note']?.toString()
-              ..createdAt = DateTime.now();
+              ..createdAt =
+                  DateTime.tryParse(item['createdAt']?.toString() ?? '') ??
+                      DateTime.now();
             await _db.fixedExpenses.put(f);
           }
         }
@@ -135,9 +335,7 @@ class ImportService {
       });
       return true;
     } catch (e) {
-      if (kDebugMode) {
-        print('Error importing JSON string: $e');
-      }
+      debugPrint('Import JSON ERROR: $e');
       return false;
     }
   }
@@ -149,7 +347,8 @@ class ImportService {
       AuthWrapper.pauseLock = true;
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['json'],
+        // Gói backup mới là .zip (kèm ảnh hóa đơn), bản cũ là .json
+        allowedExtensions: ['json', 'zip'],
       );
       AuthWrapper.pauseLock = false;
 
@@ -158,13 +357,14 @@ class ImportService {
       }
 
       final file = File(result.files.single.path!);
-      final content = await file.readAsString();
-      
-      return await importFromJsonString(content);
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error importing JSON: $e');
+
+      if (file.path.toLowerCase().endsWith('.zip')) {
+        return await importFromArchiveBytes(await file.readAsBytes());
       }
+
+      return await importFromJsonString(await file.readAsString());
+    } catch (e) {
+      debugPrint('Import JSON file ERROR: $e');
       return false;
     }
   }
@@ -185,15 +385,25 @@ class ImportService {
 
       final file = File(result.files.single.path!);
       final bytes = await file.readAsBytes();
+
+      // Gói backup .zip (data.json + ảnh) đi đường riêng
+      if (_isBackupArchive(bytes)) {
+        return await importFromArchiveBytes(bytes);
+      }
+
       final archive = ZipDecoder().decodeBytes(bytes);
 
-      // Auto Backup trước khi xử lý
-      if (await hasAnyData()) {
-        final backupJson = await ExportService().getAllDataAsJsonString();
-        final tempDir = await getApplicationDocumentsDirectory();
-        final backupFile = File('${tempDir.path}/monejour_auto_backup_${DateTime.now().millisecondsSinceEpoch}.json');
-        await backupFile.writeAsString(backupJson);
+      // Không có file CSV nào nhận diện được thì DỪNG, đừng xóa dữ liệu.
+      // Trước đây zip lạ vẫn clear sạch database rồi báo thành công.
+      final hasKnownCsv = archive.files.any((f) =>
+          f.isFile && _knownCsvNames.contains(f.name.split('/').last));
+      if (!hasKnownCsv) {
+        debugPrint('Zip không chứa file CSV nào của app');
+        return false;
       }
+
+      // Auto Backup trước khi xử lý
+      await _writeAutoBackup();
 
       await _db.writeTxn(() async {
         // Clear old data
@@ -211,25 +421,8 @@ class ImportService {
 
             if (filename == 'expenses.csv') {
               for (int i = 1; i < csvRows.length; i++) {
-                final row = csvRows[i];
-                if (row.length < 6) continue;
-                final e = Expense()
-                  ..id = _parseInt(row[0], Isar.autoIncrement)
-                  ..amount = _parseDouble(row[1])
-                  ..category = row[2].toString().isEmpty ? 'other' : row[2].toString()
-                  ..note = _parseNullableString(row[3])
-                  ..date = DateTime.tryParse(row[4].toString()) ?? DateTime.now()
-                  ..isIncome = _parseBool(row[5])
-                  ..createdAt = row.length > 6 ? (DateTime.tryParse(row[6].toString()) ?? DateTime.now()) : DateTime.now()
-                  ..isFixed = row.length > 7 ? _parseBool(row[7]) : false
-                  ..isTransfer = row.length > 8 ? _parseBool(row[8]) : false
-                  ..source = (() {
-                    final idx = row.length > 9 ? _parseInt(row[9], 0) : 0;
-                    return (idx >= 0 && idx < FundingSource.values.length)
-                        ? FundingSource.values[idx]
-                        : FundingSource.cash;
-                  })()
-                  ..receiptImagePath = _parseNullableString(row[10]);
+                final e = expenseFromCsvRow(csvRows[i]);
+                if (e == null) continue;
                 await _db.expenses.put(e);
               }
             } else if (filename == 'budgets.csv') {

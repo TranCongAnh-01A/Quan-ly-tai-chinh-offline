@@ -14,11 +14,18 @@ class CloudSyncLoading extends CloudSyncState {}
 class CloudSyncConnected extends CloudSyncState {
   final String email;
   final String? lastSyncTime;
-  
-  const CloudSyncConnected({required this.email, this.lastSyncTime});
+
+  /// Trên Drive có bản sao lưu hay không — quyết định có cho bấm "Khôi phục".
+  final bool hasRemoteBackup;
+
+  const CloudSyncConnected({
+    required this.email,
+    this.lastSyncTime,
+    this.hasRemoteBackup = false,
+  });
 
   @override
-  List<Object?> get props => [email, lastSyncTime];
+  List<Object?> get props => [email, lastSyncTime, hasRemoteBackup];
 }
 
 class CloudSyncError extends CloudSyncState {
@@ -35,12 +42,15 @@ class CloudSyncSuccess extends CloudSyncState {
   final String email;
   final String? lastSyncTime;
   
+  final bool hasRemoteBackup;
+
   const CloudSyncSuccess({
-    required this.message, 
-    required this.email, 
+    required this.message,
+    required this.email,
     this.lastSyncTime,
+    this.hasRemoteBackup = false,
   });
 
   @override
-  List<Object?> get props => [message, email, lastSyncTime];
+  List<Object?> get props => [message, email, lastSyncTime, hasRemoteBackup];
 }
