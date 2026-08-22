@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../widgets/tutorial_dialog.dart';
 import '../../widgets/animated_slide_down.dart';
+import 'widgets/auto_backup_card.dart';
 import 'widgets/settings_sections.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -69,6 +70,18 @@ class SettingsScreen extends StatelessWidget {
                 SettingsSectionTitle(title: 'Quản lý dữ liệu'),
                 SizedBox(height: 12),
                 DataCard(),
+              ],
+            ),
+          ),
+          SizedBox(height: 24),
+          FadeInSlideDown(
+            index: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SettingsSectionTitle(title: 'Sao lưu tự động'),
+                SizedBox(height: 12),
+                AutoBackupCard(),
               ],
             ),
           ),

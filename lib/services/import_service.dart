@@ -17,6 +17,29 @@ import '../core/utils/receipt_storage.dart';
 import '../ui/screens/auth/auth_wrapper.dart';
 import 'export_service.dart';
 
+/// Một bản sao lưu tự động nằm trong thư mục riêng của app.
+class AutoBackupEntry {
+  final File file;
+  final DateTime createdAt;
+  final int sizeBytes;
+
+  const AutoBackupEntry({
+    required this.file,
+    required this.createdAt,
+    required this.sizeBytes,
+  });
+
+  /// Dung lượng dạng dễ đọc: "1,2 MB", "980 KB".
+  String get readableSize {
+    if (sizeBytes >= 1024 * 1024) {
+      final mb = sizeBytes / (1024 * 1024);
+      return '${mb.toStringAsFixed(1).replaceAll('.', ',')} MB';
+    }
+    if (sizeBytes >= 1024) return '${(sizeBytes / 1024).round()} KB';
+    return '$sizeBytes B';
+  }
+}
+
 class ImportService {
   Isar get _db => DatabaseService.instance;
 
@@ -85,6 +108,65 @@ class ImportService {
     await backupFile.writeAsString(backupJson);
 
     await pruneAutoBackups(dir);
+  }
+
+  /// Danh sách bản sao lưu tự động, mới nhất trước.
+  ///
+  /// Các file này nằm trong thư mục riêng của app nên bộ chọn file của hệ
+  /// điều hành không thấy — không liệt kê ra thì người dùng không có đường
+  /// nào chạm tới, và lưới an toàn coi như không tồn tại.
+  Future<List<AutoBackupEntry>> listAutoBackups() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      return readAutoBackups(dir);
+    } catch (e) {
+      debugPrint('List auto backup ERROR: $e');
+      return const [];
+    }
+  }
+
+  @visibleForTesting
+  List<AutoBackupEntry> readAutoBackups(Directory dir) {
+    if (!dir.existsSync()) return const [];
+
+    final entries = <AutoBackupEntry>[];
+
+    for (final file in dir.listSync().whereType<File>()) {
+      final name = file.uri.pathSegments.last;
+      if (!name.startsWith(_autoBackupPrefix)) continue;
+
+      final timestamp = int.tryParse(
+        name.substring(_autoBackupPrefix.length).replaceAll('.json', ''),
+      );
+      if (timestamp == null) continue;
+
+      entries.add(AutoBackupEntry(
+        file: file,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(timestamp),
+        sizeBytes: file.lengthSync(),
+      ));
+    }
+
+    entries.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return entries;
+  }
+
+  /// Khôi phục từ 1 bản sao lưu tự động.
+  ///
+  /// Dữ liệu hiện tại lại được chụp thêm 1 bản trước khi ghi đè (bên trong
+  /// importFromJsonString), nên bấm nhầm vẫn còn đường lùi.
+  Future<bool> restoreFromAutoBackup(AutoBackupEntry entry) async {
+    try {
+      if (!await entry.file.exists()) {
+        debugPrint('Bản sao lưu tự động không còn tồn tại');
+        return false;
+      }
+
+      return await importFromJsonString(await entry.file.readAsString());
+    } catch (e) {
+      debugPrint('Restore auto backup ERROR: $e');
+      return false;
+    }
   }
 
   /// Chỉ giữ lại [maxAutoBackups] bản mới nhất.

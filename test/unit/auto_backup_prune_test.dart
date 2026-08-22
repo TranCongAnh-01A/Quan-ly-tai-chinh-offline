@@ -83,4 +83,65 @@ void main() {
 
     await service.pruneAutoBackups(missing);
   });
+
+  group('readAutoBackups', () {
+    test('Liệt kê bản sao lưu, mới nhất trước', () {
+      makeBackup(1000);
+      makeBackup(3000);
+      makeBackup(2000);
+
+      final entries = service.readAutoBackups(tempDir);
+
+      expect(entries.length, 3);
+      expect(
+        entries.map((e) => e.createdAt.millisecondsSinceEpoch).toList(),
+        [3000, 2000, 1000],
+      );
+    });
+
+    test('Đọc đúng thời điểm và dung lượng từ tên file', () {
+      final file = makeBackup(1755882194000);
+      final entries = service.readAutoBackups(tempDir);
+
+      expect(entries.single.createdAt,
+          DateTime.fromMillisecondsSinceEpoch(1755882194000));
+      expect(entries.single.sizeBytes, file.lengthSync());
+    });
+
+    test('Bỏ qua file khác trong thư mục', () {
+      makeBackup(1000);
+      File('${tempDir.path}/receipt_1.jpg').writeAsStringSync('anh');
+      File('${tempDir.path}/monejour_backup.json').writeAsStringSync('{}');
+
+      expect(service.readAutoBackups(tempDir).length, 1);
+    });
+
+    test('Bỏ qua file có timestamp hỏng', () {
+      File('${tempDir.path}/monejour_auto_backup_abc.json')
+          .writeAsStringSync('{}');
+      makeBackup(1000);
+
+      expect(service.readAutoBackups(tempDir).length, 1);
+    });
+
+    test('Thư mục không tồn tại thì trả danh sách rỗng', () {
+      final missing = Directory('${tempDir.path}/khong_ton_tai');
+
+      expect(service.readAutoBackups(missing), isEmpty);
+    });
+  });
+
+  group('AutoBackupEntry.readableSize', () {
+    AutoBackupEntry entryOfSize(int bytes) => AutoBackupEntry(
+          file: File('x'),
+          createdAt: DateTime(2026),
+          sizeBytes: bytes,
+        );
+
+    test('Byte, KB, MB', () {
+      expect(entryOfSize(512).readableSize, '512 B');
+      expect(entryOfSize(1024 * 980).readableSize, '980 KB');
+      expect(entryOfSize((1024 * 1024 * 1.2).round()).readableSize, '1,2 MB');
+    });
+  });
 }
