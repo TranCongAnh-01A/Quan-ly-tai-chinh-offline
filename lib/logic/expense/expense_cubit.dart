@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../core/utils/receipt_storage.dart';
 import '../../data/models/expense.dart';
 import '../../data/repositories/expense_repository.dart';
 import 'expense_state.dart';
@@ -36,42 +37,62 @@ class ExpenseCubit extends Cubit<ExpenseState> {
       final start = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
       final end = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0, 23, 59, 59, 999, 999);
 
-      final expenses = await _repository.getByDateRange(start, end);
-      final totalExpense = await _repository.getTotalExpense(start, end);
-      final totalIncome = await _repository.getTotalIncome(start, end);
-
-      // Tính số dư lũy kế từ trước đến nay (không bao gồm tháng hiện tại)
       // Dùng Unix epoch (1970) làm mốc — đảm bảo lấy được mọi giao dịch cũ
       final pastStart = DateTime(1970);
-      final pastEnd = start.subtract(const Duration(microseconds: 1));
-      final pastIncome = await _repository.getTotalIncome(pastStart, pastEnd);
-      final pastExpense = await _repository.getTotalExpense(pastStart, pastEnd);
-      final carriedOverBalance = pastIncome - pastExpense;
-      // Lấy toàn bộ giao dịch từ trước đến cuối tháng hiện tại để tính đúng quỹ
-      final allExpensesUpToEnd = await _repository.getByDateRange(pastStart, end);
+
+      // Một truy vấn duy nhất cho toàn bộ lịch sử tới hết tháng đang xem, rồi
+      // duyệt 1 lượt tính mọi con số. Trước đây chỗ này chạy 6 truy vấn (2 lần
+      // quét toàn bộ lịch sử + 4 truy vấn tổng), lặp lại sau MỖI lần ghi DB.
+      final allUpToEnd = await _repository.getByDateRange(pastStart, end);
+
+      final expenses = <Expense>[];
+      double totalExpense = 0;
+      double totalIncome = 0;
+      double pastIncome = 0;
+      double pastExpense = 0;
       double totalCash = 0;
       double totalBank = 0;
-      
-      for (final e in allExpensesUpToEnd) {
+
+      for (final e in allUpToEnd) {
+        // Query đã giới hạn <= end, nên chỉ cần so với mốc đầu tháng
+        final isInSelectedMonth = !e.date.isBefore(start);
+        if (isInSelectedMonth) expenses.add(e);
+
         if (e.isTransfer) {
+          // Chuyển tiền nội bộ: đổi chỗ giữa 2 quỹ, không phải thu hay chi
           if (e.source == FundingSource.cash) {
-            // Transfer from Cash -> Bank
             totalCash -= e.amount;
             totalBank += e.amount;
           } else {
-            // Transfer from Bank -> Cash
             totalBank -= e.amount;
             totalCash += e.amount;
           }
+          continue;
+        }
+
+        final signedAmount = e.isIncome ? e.amount : -e.amount;
+        if (e.source == FundingSource.cash) {
+          totalCash += signedAmount;
         } else {
-          final amount = e.isIncome ? e.amount : -e.amount;
-          if (e.source == FundingSource.cash) {
-            totalCash += amount;
+          totalBank += signedAmount;
+        }
+
+        if (isInSelectedMonth) {
+          if (e.isIncome) {
+            totalIncome += e.amount;
           } else {
-            totalBank += amount;
+            totalExpense += e.amount;
+          }
+        } else {
+          if (e.isIncome) {
+            pastIncome += e.amount;
+          } else {
+            pastExpense += e.amount;
           }
         }
       }
+
+      final carriedOverBalance = pastIncome - pastExpense;
 
       emit(ExpenseLoaded(
         expenses: expenses,
@@ -131,8 +152,17 @@ class ExpenseCubit extends Cubit<ExpenseState> {
   }
 
   /// Xóa khoản chi tiêu theo ID.
+  ///
+  /// Xóa kèm ảnh hóa đơn đính kèm — nếu không, file ảnh ở lại thư mục
+  /// documents vĩnh viễn mà không giao dịch nào tham chiếu tới.
   Future<void> deleteExpense(int id) async {
+    final existing = await _repository.getById(id);
+
     await _repository.delete(id);
+
+    if (existing?.receiptImagePath != null) {
+      await ReceiptStorage.delete(existing!.receiptImagePath);
+    }
   }
 
   /// Reload nội bộ — gọi bởi Isar watcher khi data thay đổi.
