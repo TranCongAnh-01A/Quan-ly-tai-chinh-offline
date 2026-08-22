@@ -27,6 +27,28 @@ subprojects {
                     namespace = match?.groupValues?.get(1)
                 }
             }
+
+        }
+    }
+
+    // Đồng bộ compileSdk của mọi plugin với app.
+    //
+    // isar_flutter_libs compile bằng SDK cũ nên bản release chết ở
+    // `verifyReleaseResources`: "resource android:attr/lStar not found"
+    // (lStar là attribute của androidx core, cần compileSdk >= 31).
+    //
+    // Phải đặt trong afterEvaluate: nếu gán sớm hơn thì chính build script của
+    // plugin đó chạy sau và ghi đè lại giá trị của mình.
+    //
+    // Bỏ qua project đã đánh giá xong (`:app` bị evaluationDependsOn ở trên
+    // kéo lên sớm) — gọi afterEvaluate lúc đó sẽ ném lỗi, mà `:app` vốn đã
+    // đặt compileSdk = 36 rồi.
+    if (!project.state.executed) {
+        project.afterEvaluate {
+            val androidExtension = project.extensions.findByName("android")
+            if (androidExtension is com.android.build.gradle.BaseExtension) {
+                androidExtension.compileSdkVersion(36)
+            }
         }
     }
 }

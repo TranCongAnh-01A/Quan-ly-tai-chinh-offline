@@ -47,6 +47,23 @@
    flutter run
    ```
 
+## 📦 Build bản phát hành (Android)
+
+Mặc định bản release được ký bằng **debug key** để `flutter run --release` chạy
+được ngay — bản này **không đăng lên Play Store được**.
+
+Để ký bằng khóa thật, tạo file `android/key.properties` (file này đã được
+`.gitignore`, tuyệt đối không commit):
+
+```properties
+storePassword=<mật_khẩu_keystore>
+keyPassword=<mật_khẩu_key>
+keyAlias=<tên_alias>
+storeFile=<đường_dẫn_tới_file_.jks>
+```
+
+Có file này thì `flutter build appbundle --release` tự động ký bằng khóa thật.
+
 ## 📚 Tài liệu chi tiết
 
 Để tìm hiểu sâu hơn về kiến trúc dự án, cách thiết lập cấu hình nâng cao, hoặc cách đóng góp mã nguồn, vui lòng xem trong thư mục `docs/`:
