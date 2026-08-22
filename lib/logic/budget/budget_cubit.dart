@@ -12,7 +12,7 @@ import 'budget_state.dart';
 /// Luồng:
 ///   1. loadBudgets(month, year) → query tất cả Budget + tính spending
 ///   2. Expense watcher → auto-reload khi có giao dịch mới
-///   3. checkBudgetWarning(categoryId, amount) → kiểm tra trước khi lưu
+///   3. checkBudgetWarning(categoryId, amount, date: ...) → kiểm tra trước khi lưu
 class BudgetCubit extends Cubit<BudgetState> {
   final BudgetRepository _budgetRepo;
   final ExpenseRepository _expenseRepo;
@@ -98,28 +98,46 @@ class BudgetCubit extends Cubit<BudgetState> {
   /// null nếu không cần cảnh báo.
   /// Kiểm tra cảnh báo hạn mức trước khi lưu giao dịch.
   ///
+  /// [date] — ngày của giao dịch sắp lưu. Hạn mức được tra theo tháng/năm của
+  /// ngày này, không phải tháng đang hiển thị. Bỏ trống → dùng tháng hiện tại.
+  ///
   /// [oldAmount] — số tiền cũ (khi chỉnh sửa giao dịch), truyền 0 nếu thêm mới.
   /// Cần trừ đi để tránh double-count: currentSpending đã bao gồm oldAmount.
+  /// [oldCategoryId] và [oldDate] — danh mục/ngày cũ của giao dịch đang sửa.
+  /// Chỉ trừ [oldAmount] khi giao dịch cũ nằm trong CÙNG danh mục và CÙNG
+  /// tháng đang kiểm tra — nếu không, oldAmount không có trong currentSpending
+  /// nên trừ đi sẽ làm cảnh báo tính thiếu.
   Future<BudgetProgress?> checkBudgetWarning(
     String categoryId,
     double amount, {
+    DateTime? date,
     double oldAmount = 0,
+    String? oldCategoryId,
+    DateTime? oldDate,
   }) async {
+    final month = date?.month ?? _currentMonth;
+    final year = date?.year ?? _currentYear;
+
     final budget = await _budgetRepo.getByCategoryMonth(
       categoryId,
-      _currentMonth,
-      _currentYear,
+      month,
+      year,
     );
 
     if (budget == null) return null;
 
     final currentSpending = await _expenseRepo.getCategorySpending(
       categoryId,
-      _currentMonth,
-      _currentYear,
+      month,
+      year,
     );
 
-    final afterSpending = currentSpending - oldAmount + amount;
+    final isSameCategory = oldCategoryId == null || oldCategoryId == categoryId;
+    final isSameMonth =
+        oldDate == null || (oldDate.month == month && oldDate.year == year);
+    final deductible = (isSameCategory && isSameMonth) ? oldAmount : 0.0;
+
+    final afterSpending = currentSpending - deductible + amount;
     final progress = BudgetProgress(
       categoryId: categoryId,
       amountLimit: budget.amountLimit,

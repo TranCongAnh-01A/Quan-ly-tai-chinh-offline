@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:mone_jour/data/models/budget.dart';
 import 'package:mone_jour/data/repositories/budget_repository.dart';
@@ -195,6 +195,102 @@ void main() {
     final result = await cubit.checkBudgetWarning('food', 100000);
     expect(result, isNotNull);
     expect(result!.status, BudgetStatus.warning);
+  });
+
+  test('checkBudgetWarning() tra hạn mức theo thang cua giao dich, khong phai thang dang xem', () async {
+    final budget = makeBudget(amountLimit: 1000000, month: 3, year: 2026);
+    when(() => mockBudgetRepo.getByMonth(any(), any())).thenAnswer((_) async => []);
+    when(() => mockBudgetRepo.getByCategoryMonth('food', 3, 2026)).thenAnswer((_) async => budget);
+    when(() => mockBudgetRepo.getByCategoryMonth('food', any(that: isNot(3)), any())).thenAnswer((_) async => null);
+    when(() => mockExpenseRepo.getCategorySpending('food', 3, 2026)).thenAnswer((_) async => 750000);
+
+    cubit = BudgetCubit(
+      budgetRepository: mockBudgetRepo,
+      expenseRepository: mockExpenseRepo,
+    );
+
+    final result = await cubit.checkBudgetWarning(
+      'food',
+      100000,
+      date: DateTime(2026, 3, 15),
+    );
+
+    expect(result, isNotNull);
+    expect(result!.status, BudgetStatus.warning);
+    verify(() => mockExpenseRepo.getCategorySpending('food', 3, 2026)).called(1);
+  });
+
+  test('checkBudgetWarning() KHONG tru oldAmount khi sua giao dich sang danh muc khac', () async {
+    final budget = makeBudget(categoryId: 'shopping', amountLimit: 1000000);
+    when(() => mockBudgetRepo.getByMonth(any(), any())).thenAnswer((_) async => []);
+    when(() => mockBudgetRepo.getByCategoryMonth('shopping', any(), any())).thenAnswer((_) async => budget);
+    when(() => mockExpenseRepo.getCategorySpending('shopping', any(), any())).thenAnswer((_) async => 750000);
+
+    cubit = BudgetCubit(
+      budgetRepository: mockBudgetRepo,
+      expenseRepository: mockExpenseRepo,
+    );
+
+    // Giao dich cu 500k thuoc danh muc 'food' -> khong nam trong spending cua
+    // 'shopping', neu tru nham se ra 350k/1000k = 35% va bo qua canh bao.
+    final result = await cubit.checkBudgetWarning(
+      'shopping',
+      100000,
+      oldAmount: 500000,
+      oldCategoryId: 'food',
+    );
+
+    expect(result, isNotNull);
+    expect(result!.currentSpending, 850000);
+    expect(result.status, BudgetStatus.warning);
+  });
+
+  test('checkBudgetWarning() VAN tru oldAmount khi cung danh muc va cung thang', () async {
+    final budget = makeBudget(amountLimit: 1000000, month: 8, year: 2026);
+    when(() => mockBudgetRepo.getByMonth(any(), any())).thenAnswer((_) async => []);
+    when(() => mockBudgetRepo.getByCategoryMonth('food', any(), any())).thenAnswer((_) async => budget);
+    when(() => mockExpenseRepo.getCategorySpending('food', any(), any())).thenAnswer((_) async => 750000);
+
+    cubit = BudgetCubit(
+      budgetRepository: mockBudgetRepo,
+      expenseRepository: mockExpenseRepo,
+    );
+
+    final result = await cubit.checkBudgetWarning(
+      'food',
+      100000,
+      date: DateTime(2026, 8, 10),
+      oldAmount: 500000,
+      oldCategoryId: 'food',
+      oldDate: DateTime(2026, 8, 2),
+    );
+
+    // 750k - 500k + 100k = 350k -> 35% -> khong canh bao
+    expect(result, isNull);
+  });
+
+  test('checkBudgetWarning() KHONG tru oldAmount khi giao dich cu o thang khac', () async {
+    final budget = makeBudget(amountLimit: 1000000, month: 8, year: 2026);
+    when(() => mockBudgetRepo.getByMonth(any(), any())).thenAnswer((_) async => []);
+    when(() => mockBudgetRepo.getByCategoryMonth('food', any(), any())).thenAnswer((_) async => budget);
+    when(() => mockExpenseRepo.getCategorySpending('food', any(), any())).thenAnswer((_) async => 750000);
+
+    cubit = BudgetCubit(
+      budgetRepository: mockBudgetRepo,
+      expenseRepository: mockExpenseRepo,
+    );
+
+    final result = await cubit.checkBudgetWarning(
+      'food',
+      100000,
+      date: DateTime(2026, 8, 10),
+      oldAmount: 500000,
+      oldCategoryId: 'food',
+      oldDate: DateTime(2026, 7, 20),
+    );
+
+    expect(result, isNotNull);
+    expect(result!.currentSpending, 850000);
   });
 
   // ── BudgetProgress unit logic ─────────────────────────────────────────────────
