@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:mone_jour/services/cloud_sync_service.dart';
@@ -117,6 +118,50 @@ void main() {
       final message = CloudSyncService.describeError(Exception('gi do'));
 
       expect(message, isNotEmpty);
+    });
+  });
+
+  group('CloudSyncService.describeSignInError', () {
+    test('Lỗi 10 chỉ thẳng ra SHA-1 / tên gói', () {
+      final message = CloudSyncService.describeSignInError(
+        PlatformException(
+          code: 'sign_in_failed',
+          message: 'com.google.android.gms.common.api.ApiException: 10: ',
+        ),
+      );
+
+      expect(message, contains('SHA-1'));
+      expect(message, contains('com.monejour.mone_jour'));
+    });
+
+    test('Lỗi 12500', () {
+      final message = CloudSyncService.describeSignInError(
+        PlatformException(
+          code: 'sign_in_failed',
+          message: 'com.google.android.gms.common.api.ApiException: 12500: ',
+        ),
+      );
+
+      expect(message, contains('12500'));
+    });
+
+    test('Lỗi 7 là mất mạng', () {
+      final message = CloudSyncService.describeSignInError(
+        PlatformException(
+          code: 'sign_in_failed',
+          message: 'com.google.android.gms.common.api.ApiException: 7: ',
+        ),
+      );
+
+      expect(message, contains('kết nối mạng'));
+    });
+
+    test('PlatformException lạ vẫn nêu được code', () {
+      final message = CloudSyncService.describeSignInError(
+        PlatformException(code: 'something_odd', message: 'chi tiet'),
+      );
+
+      expect(message, contains('something_odd'));
     });
   });
 }

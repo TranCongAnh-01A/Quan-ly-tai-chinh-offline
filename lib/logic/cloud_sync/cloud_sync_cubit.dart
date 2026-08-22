@@ -79,11 +79,20 @@ class CloudSyncCubit extends Cubit<CloudSyncState> {
 
   Future<void> signIn() async {
     emit(CloudSyncLoading());
-    final account = await _syncService.signIn();
-    if (account != null) {
+    try {
+      final account = await _syncService.signIn();
+
+      if (account == null) {
+        // null = người dùng tự bấm hủy, không phải lỗi
+        emit(CloudSyncInitial());
+        return;
+      }
+
       await _emitConnected(account.email);
-    } else {
-      await _emitErrorThenRestore('Đăng nhập thất bại hoặc bị hủy.', null);
+    } on CloudSyncFailure catch (e) {
+      await _emitErrorThenRestore(e.message, null);
+    } catch (e) {
+      await _emitErrorThenRestore(CloudSyncService.describeError(e), null);
     }
   }
 

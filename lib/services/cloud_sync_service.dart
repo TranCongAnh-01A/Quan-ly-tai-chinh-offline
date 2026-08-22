@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
@@ -74,6 +75,9 @@ class CloudSyncService {
   /// Bảng chọn tài khoản của Google đẩy app ra nền, nên phải tạm dừng khóa
   /// PIN giống các luồng native khác (Share, FilePicker, ImagePicker) — nếu
   /// không thì quay lại app là bị bắt nhập PIN giữa chừng thao tác sao lưu.
+  /// Trả về null khi người dùng tự bấm hủy. Mọi lỗi thật đều ném
+  /// [CloudSyncFailure] kèm nguyên nhân cụ thể — nuốt hết thành null như
+  /// trước thì người dùng không tài nào biết vì sao không đăng nhập được.
   Future<GoogleSignInAccount?> signIn() async {
     AuthWrapper.pauseLock = true;
     try {
@@ -81,10 +85,52 @@ class CloudSyncService {
     } catch (e, stackTrace) {
       debugPrint('CloudSync signIn ERROR: $e');
       debugPrint('CloudSync signIn STACK: $stackTrace');
-      return null;
+
+      if (_isUserCancelled(e)) return null;
+
+      throw CloudSyncFailure(describeSignInError(e));
     } finally {
       AuthWrapper.pauseLock = false;
     }
+  }
+
+  static bool _isUserCancelled(Object error) {
+    final text = error.toString();
+    return text.contains('sign_in_canceled') ||
+        text.contains('12501') ||
+        _apiExceptionCode(error) == 12501;
+  }
+
+  /// Rút mã lỗi từ chuỗi kiểu "com.google.android.gms.common.api.ApiException: 10: "
+  static int? _apiExceptionCode(Object error) {
+    final match =
+        RegExp(r'ApiException:\s*(\d+)').firstMatch(error.toString());
+    return match == null ? null : int.tryParse(match.group(1)!);
+  }
+
+  /// Diễn giải lỗi đăng nhập Google Sign-In.
+  static String describeSignInError(Object error) {
+    switch (_apiExceptionCode(error)) {
+      case 10:
+        // DEVELOPER_ERROR — gần như luôn là SHA-1 hoặc tên gói chưa khớp
+        return 'Ứng dụng chưa được đăng ký đúng với Google (lỗi 10). '
+            'Kiểm tra tên gói com.monejour.mone_jour và vân tay SHA-1 trên '
+            'Google Cloud Console — xem docs/google_drive_api_setup.md.';
+      case 12500:
+        return 'Google Sign-In thất bại (lỗi 12500). Thường do cấu hình '
+            'OAuth chưa xong hoặc Google Play Services trên máy quá cũ.';
+      case 7:
+        return 'Không có kết nối mạng khi đăng nhập Google.';
+      case 12502:
+        return 'Đang có một phiên đăng nhập khác chạy dở. Thử lại sau giây lát.';
+    }
+
+    if (error is PlatformException) {
+      return 'Đăng nhập Google thất bại: ${error.code} '
+          '${error.message ?? ''}'.trim();
+    }
+
+    return 'Đăng nhập Google thất bại: $error';
   }
 
   /// Đăng xuất khỏi Google
