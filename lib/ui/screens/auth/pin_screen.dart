@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:local_auth/local_auth.dart';
@@ -5,6 +7,7 @@ import 'package:local_auth/local_auth.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/security_utils.dart';
 import '../../../logic/settings/settings_cubit.dart';
+import '../../../logic/settings/settings_state.dart';
 import 'auth_wrapper.dart';
 import 'widgets/pin_widgets.dart';
 
@@ -26,6 +29,9 @@ class _PinScreenState extends State<PinScreen> {
   bool _isConfirming = false;
   bool _hasError = false;
 
+  /// Tick mỗi giây để cập nhật đồng hồ đếm ngược khi đang bị khóa tạm thời.
+  Timer? _lockoutTicker;
+
   final List<String> _securityQuestions = [
     'Tên thú cưng đầu tiên của bạn là gì?',
     'Bạn học trường tiểu học nào?',
@@ -40,6 +46,42 @@ class _PinScreenState extends State<PinScreen> {
     if (widget.mode == PinMode.verify) {
       _checkBiometricAuth();
     }
+  }
+
+  /// Bật/tắt đồng hồ đếm ngược theo đúng trạng thái khóa.
+  ///
+  /// Chỉ chạy timer khi ĐANG bị khóa: một Timer.periodic chạy suốt vòng đời
+  /// màn hình vừa tốn rebuild mỗi giây, vừa khiến widget test không bao giờ
+  /// settle được.
+  void _syncLockoutTicker(SettingsState settings) {
+    if (!settings.isLockedOut) {
+      _lockoutTicker?.cancel();
+      _lockoutTicker = null;
+      return;
+    }
+
+    _lockoutTicker ??= Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _lockoutTicker?.cancel();
+    super.dispose();
+  }
+
+  /// Định dạng thời gian còn lại: 90s → "1:30"
+  String _formatRemaining(Duration d) {
+    final minutes = d.inMinutes;
+    final seconds = d.inSeconds % 60;
+    return minutes > 0
+        ? '$minutes:${seconds.toString().padLeft(2, '0')}'
+        : '${d.inSeconds}s';
   }
 
   Future<void> _checkBiometricAuth() async {
@@ -69,6 +111,8 @@ class _PinScreenState extends State<PinScreen> {
   }
 
   void _onKeyPress(String key) {
+    if (context.read<SettingsCubit>().state.isLockedOut) return;
+
     if (_enteredPin.length < 4) {
       setState(() {
         _enteredPin += key;
@@ -100,8 +144,10 @@ class _PinScreenState extends State<PinScreen> {
     switch (widget.mode) {
       case PinMode.verify:
         if (SecurityUtils.verifyPin(_enteredPin, pinHash)) {
-          Navigator.of(context).pop(true);
+          await cubit.resetFailedAttempts();
+          if (mounted) Navigator.of(context).pop(true);
         } else {
+          await cubit.registerFailedAttempt();
           _showError();
         }
         break;
@@ -149,6 +195,7 @@ class _PinScreenState extends State<PinScreen> {
           await cubit.removePin();
           if (mounted) Navigator.of(context).pop(true);
         } else {
+          await cubit.registerFailedAttempt();
           _showError();
         }
         break;
@@ -156,6 +203,7 @@ class _PinScreenState extends State<PinScreen> {
   }
 
   void _showError({bool resetConfirm = false}) {
+    if (!mounted) return;
     setState(() {
       _hasError = true;
       _enteredPin = '';
@@ -260,6 +308,20 @@ class _PinScreenState extends State<PinScreen> {
 
   Future<void> _handleForgotPin() async {
     final cubit = context.read<SettingsCubit>();
+
+    // Câu hỏi bảo mật cũng là một đường vào — phải chịu chung giới hạn thử
+    if (cubit.state.isLockedOut) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Đang tạm khóa, thử lại sau '
+            '${_formatRemaining(cubit.state.remainingLockout)}',
+          ),
+        ),
+      );
+      return;
+    }
+
     final qIndex = cubit.state.securityQuestionIndex;
     final correctAnswerHash = cubit.state.securityAnswerHash;
 
@@ -301,12 +363,21 @@ class _PinScreenState extends State<PinScreen> {
                   child: const Text('Hủy'),
                 ),
                 FilledButton(
-                  onPressed: () {
+                  onPressed: () async {
                     if (SecurityUtils.verifySecurityAnswer(controller.text, correctAnswerHash)) {
                       Navigator.of(context).pop(true);
-                    } else {
-                      setStateDialog(() => showError = true);
+                      return;
                     }
+
+                    await cubit.registerFailedAttempt();
+                    if (!context.mounted) return;
+
+                    // Sai quá nhiều lần → đóng dialog, chờ hết thời gian khóa
+                    if (cubit.state.isLockedOut) {
+                      Navigator.of(context).pop(false);
+                      return;
+                    }
+                    setStateDialog(() => showError = true);
                   },
                   child: const Text('Xác nhận'),
                 ),
@@ -333,6 +404,12 @@ class _PinScreenState extends State<PinScreen> {
     final theme = Theme.of(context);
     final canPop = widget.mode != PinMode.verify;
 
+    final settings = context.watch<SettingsCubit>().state;
+    final isLockedOut = settings.isLockedOut;
+    _syncLockoutTicker(settings);
+    final attemptsLeft =
+        SettingsCubit.maxAttemptsBeforeLockout - settings.failedAttempts;
+
     return PopScope(
       canPop: canPop,
       child: Scaffold(
@@ -348,46 +425,112 @@ class _PinScreenState extends State<PinScreen> {
               : const SizedBox.shrink(),
         ),
         body: SafeArea(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Spacer(),
-              PinHeader(mode: widget.mode, isConfirming: _isConfirming),
-              const SizedBox(height: 40),
-              PinIndicators(enteredPin: _enteredPin),
-              const SizedBox(height: 16),
-              if (_hasError)
-                Text(
-                  widget.mode == PinMode.setup
-                      ? 'Mã PIN không khớp. Thử lại.'
-                      : 'Mã PIN sai. Vui lòng thử lại.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: AppTheme.dangerRed,
-                    fontWeight: FontWeight.w600,
+          // Màn hình thấp (điện thoại nhỏ, chia đôi màn hình, bàn phím bật)
+          // sẽ tràn Column nếu không cho cuộn. LayoutBuilder + IntrinsicHeight
+          // giữ nguyên Spacer khi màn đủ cao, chỉ cuộn khi thực sự thiếu chỗ.
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Spacer(),
+                        PinHeader(mode: widget.mode, isConfirming: _isConfirming),
+                        const SizedBox(height: 40),
+                        PinIndicators(enteredPin: _enteredPin),
+                        const SizedBox(height: 16),
+                        _buildStatusMessage(theme, settings, attemptsLeft),
+                        const Spacer(),
+                        PinNumpad(
+                          onKeyPress: _onKeyPress,
+                          onBackspace: _onBackspace,
+                          enabled: !isLockedOut,
+                          biometricButton: _buildBiometricButton(theme),
+                        ),
+                        if (widget.mode == PinMode.verify)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 24),
+                            child: TextButton(
+                              onPressed: isLockedOut ? null : _handleForgotPin,
+                              child: const Text('Quên mã PIN?'),
+                            ),
+                          )
+                        else
+                          const SizedBox(height: 72),
+                      ],
+                    ),
                   ),
-                )
-              else
-                const SizedBox(height: 20),
-              const Spacer(),
-              PinNumpad(
-                onKeyPress: _onKeyPress,
-                onBackspace: _onBackspace,
-                biometricButton: _buildBiometricButton(theme),
-              ),
-              if (widget.mode == PinMode.verify)
-                Padding(
-                  padding: const EdgeInsets.only(top: 24),
-                  child: TextButton(
-                    onPressed: _handleForgotPin,
-                    child: const Text('Quên mã PIN?'),
-                  ),
-                )
-              else
-                const SizedBox(height: 72),
-            ],
+                ),
+              );
+            },
           ),
         ),
       ),
+    );
+  }
+
+  /// Dòng trạng thái dưới ô PIN: đang khóa / báo sai / số lần còn lại.
+  Widget _buildStatusMessage(
+    ThemeData theme,
+    SettingsState settings,
+    int attemptsLeft,
+  ) {
+    if (settings.isLockedOut) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          children: [
+            Text(
+              'Nhập sai quá nhiều lần',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppTheme.dangerRed,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Thử lại sau ${_formatRemaining(settings.remainingLockout)}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!_hasError) return const SizedBox(height: 20);
+
+    final message = widget.mode == PinMode.setup
+        ? 'Mã PIN không khớp. Thử lại.'
+        : 'Mã PIN sai. Vui lòng thử lại.';
+
+    return Column(
+      children: [
+        Text(
+          message,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: AppTheme.dangerRed,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        // Chỉ cảnh báo khi đã gần chạm ngưỡng khóa
+        if (widget.mode != PinMode.setup && attemptsLeft <= 2 && attemptsLeft > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Còn $attemptsLeft lần thử',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
     );
   }
 

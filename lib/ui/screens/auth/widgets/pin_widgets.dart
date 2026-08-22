@@ -99,63 +99,70 @@ class PinNumpad extends StatelessWidget {
   final VoidCallback onBackspace;
   final Widget biometricButton;
 
+  /// Tắt bàn phím khi đang bị khóa tạm thời do nhập sai quá nhiều lần.
+  final bool enabled;
+
   const PinNumpad({
     super.key,
     required this.onKeyPress,
     required this.onBackspace,
     required this.biometricButton,
+    this.enabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildNumpadButton('1', theme),
-              _buildNumpadButton('2', theme),
-              _buildNumpadButton('3', theme),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildNumpadButton('4', theme),
-              _buildNumpadButton('5', theme),
-              _buildNumpadButton('6', theme),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildNumpadButton('7', theme),
-              _buildNumpadButton('8', theme),
-              _buildNumpadButton('9', theme),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              biometricButton,
-              _buildNumpadButton('0', theme),
-              _buildBackspaceButton(theme),
-            ],
-          ),
-        ],
+    return Opacity(
+      opacity: enabled ? 1 : 0.4,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildNumpadButton('1', theme),
+                _buildNumpadButton('2', theme),
+                _buildNumpadButton('3', theme),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildNumpadButton('4', theme),
+                _buildNumpadButton('5', theme),
+                _buildNumpadButton('6', theme),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildNumpadButton('7', theme),
+                _buildNumpadButton('8', theme),
+                _buildNumpadButton('9', theme),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                biometricButton,
+                _buildNumpadButton('0', theme),
+                _buildBackspaceButton(theme),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildNumpadButton(String number, ThemeData theme) {
     return InkWell(
-      onTap: () => onKeyPress(number),
+      onTap: enabled ? () => onKeyPress(number) : null,
       borderRadius: BorderRadius.circular(40),
       child: Container(
         width: 80,
@@ -177,7 +184,7 @@ class PinNumpad extends StatelessWidget {
 
   Widget _buildBackspaceButton(ThemeData theme) {
     return InkWell(
-      onTap: onBackspace,
+      onTap: enabled ? onBackspace : null,
       borderRadius: BorderRadius.circular(40),
       child: Container(
         width: 80,

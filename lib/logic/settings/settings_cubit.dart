@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -20,6 +21,21 @@ class SettingsCubit extends Cubit<SettingsState> {
   static const String _biometricKey = 'monejour_biometric_enabled';
   static const String _securityQuestionIndexKey = 'monejour_security_question_index';
   static const String _securityAnswerHashKey = 'monejour_security_answer_hash';
+  static const String _failedAttemptsKey = 'monejour_pin_failed_attempts';
+  static const String _lockoutUntilKey = 'monejour_pin_lockout_until';
+
+  /// Số lần sai được phép trước khi bắt đầu khóa tạm thời.
+  static const int maxAttemptsBeforeLockout = 5;
+
+  /// Thời gian khóa tăng dần theo số lần sai tính từ lần thứ 5.
+  /// Lần sai thứ 5 → 30 giây, thứ 6 → 1 phút, ... từ thứ 9 trở đi → 30 phút.
+  static const List<Duration> lockoutSteps = [
+    Duration(seconds: 30),
+    Duration(minutes: 1),
+    Duration(minutes: 5),
+    Duration(minutes: 15),
+    Duration(minutes: 30),
+  ];
 
   // ── Key cũ (chỉ dùng cho migration từ plaintext) ──
   static const String _legacyPinKey = 'monejour_pin_code';
@@ -38,22 +54,36 @@ class SettingsCubit extends Cubit<SettingsState> {
   ///   2. Nếu có → hash giá trị cũ → lưu vào key mới → xóa key cũ
   ///   3. Các lần sau chỉ đọc từ key mới (hash)
   Future<void> _loadSettings() async {
-    // Migration: chuyển plaintext → hash nếu cần
-    await _migrateLegacyPin();
-    await _migrateLegacySecurityAnswer();
+    try {
+      // Migration: chuyển plaintext → hash nếu cần
+      await _migrateLegacyPin();
+      await _migrateLegacySecurityAnswer();
 
-    final pinHash = await _secureStorage.read(_pinHashKey);
-    final isBiometricEnabled = _prefs.getBool(_biometricKey) ?? false;
-    final securityQuestionIndex = _prefs.getInt(_securityQuestionIndexKey);
-    final securityAnswerHash = await _secureStorage.read(_securityAnswerHashKey);
+      final pinHash = await _secureStorage.read(_pinHashKey);
+      final isBiometricEnabled = _prefs.getBool(_biometricKey) ?? false;
+      final securityQuestionIndex = _prefs.getInt(_securityQuestionIndexKey);
+      final securityAnswerHash =
+          await _secureStorage.read(_securityAnswerHashKey);
+      final lockoutMillis = _prefs.getInt(_lockoutUntilKey);
 
-    emit(state.copyWith(
-      isPinEnabled: pinHash != null && pinHash.isNotEmpty,
-      pinHash: pinHash,
-      isBiometricEnabled: isBiometricEnabled,
-      securityQuestionIndex: securityQuestionIndex,
-      securityAnswerHash: securityAnswerHash,
-    ));
+      emit(state.copyWith(
+        isLoaded: true,
+        failedAttempts: _prefs.getInt(_failedAttemptsKey) ?? 0,
+        lockoutUntil: lockoutMillis == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(lockoutMillis),
+        isPinEnabled: pinHash != null && pinHash.isNotEmpty,
+        pinHash: pinHash,
+        isBiometricEnabled: isBiometricEnabled,
+        securityQuestionIndex: securityQuestionIndex,
+        securityAnswerHash: securityAnswerHash,
+      ));
+    } catch (e) {
+      // Secure storage lỗi (VD: keystore hỏng sau khi khôi phục backup).
+      // Vẫn phải bật isLoaded, nếu không màn hình khóa sẽ chờ mãi.
+      debugPrint('SettingsCubit load ERROR: $e');
+      emit(state.copyWith(isLoaded: true));
+    }
   }
 
   /// Migration: chuyển PIN plaintext (key cũ) sang SHA-256 hash (key mới).
@@ -111,10 +141,47 @@ class SettingsCubit extends Cubit<SettingsState> {
     await _prefs.remove(_biometricKey);
     await _prefs.remove(_securityQuestionIndexKey);
     await _secureStorage.delete(_securityAnswerHashKey);
+    await _prefs.remove(_failedAttemptsKey);
+    await _prefs.remove(_lockoutUntilKey);
     emit(state.copyWith(
       isPinEnabled: false,
       clearPin: true,
       clearSecurity: true,
+      clearLockout: true,
     ));
+  }
+
+  /// Ghi nhận 1 lần nhập sai PIN (hoặc sai câu trả lời bảo mật).
+  ///
+  /// Từ lần sai thứ [maxAttemptsBeforeLockout] trở đi thì khóa tạm thời với
+  /// thời gian tăng dần — PIN chỉ có 4 chữ số nên nếu không chặn thì dò hết
+  /// 10.000 khả năng là chuyện vài phút.
+  Future<void> registerFailedAttempt() async {
+    final attempts = state.failedAttempts + 1;
+    await _prefs.setInt(_failedAttemptsKey, attempts);
+
+    if (attempts < maxAttemptsBeforeLockout) {
+      emit(state.copyWith(failedAttempts: attempts));
+      return;
+    }
+
+    final stepIndex = (attempts - maxAttemptsBeforeLockout)
+        .clamp(0, lockoutSteps.length - 1);
+    final lockoutUntil = DateTime.now().add(lockoutSteps[stepIndex]);
+
+    await _prefs.setInt(_lockoutUntilKey, lockoutUntil.millisecondsSinceEpoch);
+
+    emit(state.copyWith(
+      failedAttempts: attempts,
+      lockoutUntil: lockoutUntil,
+    ));
+  }
+
+  /// Xóa bộ đếm sau khi mở khóa thành công.
+  Future<void> resetFailedAttempts() async {
+    await _prefs.remove(_failedAttemptsKey);
+    await _prefs.remove(_lockoutUntilKey);
+
+    emit(state.copyWith(clearLockout: true));
   }
 }
