@@ -1,9 +1,12 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/theme/app_theme.dart';
+import 'core/utils/receipt_storage.dart';
 import 'logic/budget/budget_cubit.dart';
 import 'logic/expense/expense_cubit.dart';
 import 'logic/fixed_expense/fixed_expense_cubit.dart';
@@ -25,20 +28,101 @@ import 'logic/cloud_sync/cloud_sync_cubit.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Khởi tạo locale tiếng Việt cho DateFormat (intl package)
-  await initializeDateFormatting('vi_VN', null);
-
-  // Khởi tạo database
-  await DatabaseService.initialize();
-
-  final prefs = await SharedPreferences.getInstance();
-
+  // Đặt handler TRƯỚC mọi khởi tạo, nếu không thì lỗi xảy ra trong lúc khởi
+  // tạo sẽ không đi qua đây.
   FlutterError.onError = (FlutterErrorDetails details) {
+    // presentError giữ nguyên hành vi mặc định (in lỗi + stack ra log).
+    // Nếu chỉ debugPrint như trước thì ở bản release lỗi bị nuốt hoàn toàn.
+    FlutterError.presentError(details);
     debugPrint('FLUTTER_ERROR: ${details.exception}');
-    debugPrint('STACK_TRACE: ${details.stack}');
   };
 
-  runApp(MoneJourApp(prefs: prefs));
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('UNCAUGHT_ASYNC_ERROR: $error');
+    debugPrint('STACK_TRACE: $stack');
+    return true;
+  };
+
+  await _bootstrap();
+}
+
+/// Khởi tạo các thành phần bắt buộc rồi chạy app.
+///
+/// Nếu mở database thất bại thì trước đây app đứng ở màn hình trắng, không
+/// thông báo gì. Giờ hiện màn hình lỗi có nút thử lại.
+Future<void> _bootstrap() async {
+  try {
+    // Khởi tạo locale tiếng Việt cho DateFormat (intl package)
+    await initializeDateFormatting('vi_VN', null);
+
+    // Khởi tạo database
+    await DatabaseService.initialize();
+
+    // Cache đường dẫn thư mục documents cho ảnh hóa đơn (xem ReceiptStorage)
+    await ReceiptStorage.initialize();
+
+    final prefs = await SharedPreferences.getInstance();
+
+    runApp(MoneJourApp(prefs: prefs));
+  } catch (e, stackTrace) {
+    debugPrint('STARTUP_ERROR: $e');
+    debugPrint('STACK_TRACE: $stackTrace');
+    runApp(StartupErrorApp(error: e));
+  }
+}
+
+/// Màn hình hiển thị khi app không khởi tạo được.
+class StartupErrorApp extends StatelessWidget {
+  final Object error;
+
+  const StartupErrorApp({super.key, required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, size: 64),
+                const SizedBox(height: 24),
+                Text(
+                  'Không mở được ứng dụng',
+                  style: Theme.of(context).textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Dữ liệu của bạn vẫn còn trên máy. '
+                  'Hãy thử lại, nếu vẫn lỗi thì khởi động lại ứng dụng.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                SelectableText(
+                  '$error',
+                  style: Theme.of(context).textTheme.bodySmall,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: _bootstrap,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Thử lại'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Root widget — cấu hình theme + BlocProviders + navigation.
