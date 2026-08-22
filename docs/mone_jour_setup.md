@@ -46,9 +46,9 @@ Mở terminal và thực hiện lần lượt các bước sau:
 ```bash
 # Bước 1: Clone dự án từ repository
 git clone <repo_url>
-cd project-app/mone_jour
+cd project-app
 
-# ✅ Kết quả mong đợi: Thư mục dự án đã được tải về thành công và terminal chuyển vào thư mục mone_jour.
+# ✅ Kết quả mong đợi: Thư mục dự án đã được tải về thành công và terminal chuyển vào thư mục gốc dự án.
 
 # Bước 2: Cài đặt các thư viện (dependencies)
 flutter pub get

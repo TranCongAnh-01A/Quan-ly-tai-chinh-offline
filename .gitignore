@@ -1,12 +1,11 @@
 # === Flutter / Dart ===
-*.dart_tool/
+.dart_tool/
 .packages
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
 
 # === Dependencies ===
-.dart_tool/
 .pub-cache/
 .pub/
 
@@ -19,6 +18,9 @@ default.isar
 .vscode/
 .idea/
 *.iml
+*.ipr
+*.iws
+.atom/
 
 # === OS ===
 .DS_Store
@@ -29,14 +31,51 @@ Thumbs.db
 *.freezed.dart
 
 # === Android ===
-mone_jour/android/.gradle/
-mone_jour/android/local.properties
-mone_jour/android/key.properties
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/debug
+android/app/profile
+android/app/release
 *.jks
 *.keystore
 
 # === iOS ===
-mone_jour/ios/Pods/
-mone_jour/ios/.symlinks/
-mone_jour/ios/Flutter/Flutter.framework
-mone_jour/ios/Flutter/Flutter.podspec
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/.last_build_id
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+**/ios/Flutter/.last_build_id
+
+# === Windows ===
+build/windows/
+
+# === Miscellaneous ===
+*.class
+*.log
+*.pyc
+*.swp
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# === Documentation ===
+**/doc/api/
+
+# === Coverage ===
+/coverage/
+
+# === Symbolication ===
+app.*.symbols
+
+# === Obfuscation ===
+app.*.map.json
+
+# === Security & API Keys ===
+google-services.json
+GoogleService-Info.plist
+*.env

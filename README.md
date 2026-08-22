@@ -26,7 +26,7 @@
 
    ```bash
    git clone <đường_dẫn_repo_của_bạn>
-   cd <tên_thư_mục>/mone_jour
+   cd <tên_thư_mục>
    ```
 
 3. Cài đặt các gói phụ thuộc (dependencies):

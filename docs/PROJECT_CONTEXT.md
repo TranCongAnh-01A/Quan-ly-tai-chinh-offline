@@ -45,7 +45,7 @@
 ## 3. Kiến Trúc Hệ Thống
 
 ```
-mone_jour/lib/
+lib/
 ├── main.dart                          # Entry point — khởi tạo DB, locale, BlocProviders
 ├── core/
 │   ├── constants/
